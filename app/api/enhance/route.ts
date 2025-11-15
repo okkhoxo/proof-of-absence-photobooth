@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import sharp from 'sharp'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { imageStore, scheduleImageCleanup } from '@/lib/imageStore'
+import { put } from '@vercel/blob'
 
 const genAI = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
@@ -15,7 +15,7 @@ async function enhanceWithGemini(buffer: Buffer): Promise<Buffer | null> {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+    const analyzeModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
 
     // 이미지를 base64로 변환
     const base64Image = buffer.toString('base64')
@@ -24,7 +24,7 @@ async function enhanceWithGemini(buffer: Buffer): Promise<Buffer | null> {
     const analyzePrompt = `Analyze this portrait photo and determine the gender of the person.
     Respond with only one word: "female", "male", or "unknown".`
 
-    const analyzeResult = await model.generateContent([
+    const analyzeResult = await analyzeModel.generateContent([
       {
         inlineData: {
           mimeType: 'image/jpeg',
@@ -37,43 +37,85 @@ async function enhanceWithGemini(buffer: Buffer): Promise<Buffer | null> {
     const gender = analyzeResult.response.text().trim().toLowerCase()
     console.log('Detected gender:', gender)
 
-    // 2단계: 성별에 따른 이미지 편집 프롬프트
-    let editPrompt = ''
+    // 2단계: 이미지 생성 모델로 전환
+    const imageModel = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash-latest',
+      generationConfig: {
+        temperature: 0.7,
+        topP: 0.8,
+      }
+    })
+
+    // 성별에 따른 이미지 생성 프롬프트
+    let imagePrompt = ''
     if (gender.includes('female')) {
-      editPrompt = `Create a professionally retouched portrait photo with these natural enhancements:
-      - Subtly slim and refine the face contour for a more V-shaped appearance
-      - Perfect the skin with smooth, clear, radiant complexion (remove blemishes, even skin tone)
-      - Gently enlarge the eyes by 10-15% for a more expressive look
-      - Slightly elevate and refine the nose bridge
-      - Enhance overall facial harmony and brightness
-      - Maintain natural appearance - avoid over-editing
-      - Keep the same pose, background, and lighting
-      - Professional photo quality with subtle makeup enhancement`
+      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
+
+Requirements for the enhanced portrait:
+- Face contour: Slim, refined V-shaped face with elegant jawline
+- Skin: Flawless, radiant complexion with perfect even tone, smooth texture, natural glow
+- Eyes: Beautifully enlarged by 10-15%, bright and expressive with natural sparkle
+- Nose: Refined, slightly elevated bridge with elegant shape
+- Overall: Enhanced feminine beauty with graceful features
+- Lighting: Professional studio lighting, soft and flattering
+- Makeup: Natural but polished - subtle enhancement
+- Quality: High-resolution professional photo quality
+- Style: Keep the same pose, similar background, natural and elegant
+
+Create a beautiful, professionally retouched portrait that looks natural and stunning.`
     } else if (gender.includes('male')) {
-      editPrompt = `Create a professionally retouched portrait photo with these natural enhancements:
-      - Broaden shoulders by 10-15% for a more athletic appearance
-      - Perfect the skin with clear, healthy complexion (remove blemishes, even skin tone)
-      - Enhance facial definition and jawline
-      - Slightly enhance muscle definition if visible
-      - Improve overall masculine features naturally
-      - Maintain natural appearance - avoid over-editing
-      - Keep the same pose, background, and lighting
-      - Professional photo quality`
+      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
+
+Requirements for the enhanced portrait:
+- Shoulders: Broader by 10-15%, athletic and strong appearance
+- Skin: Clear, healthy masculine complexion with even tone
+- Face: Strong jawline, defined facial features, masculine charm
+- Body: Athletic build with natural muscle definition
+- Overall: Enhanced masculine features with confidence
+- Lighting: Professional studio lighting with dramatic shadows
+- Quality: High-resolution professional photo quality
+- Style: Keep the same pose, similar background, natural and powerful
+
+Create a handsome, professionally retouched portrait that looks natural and confident.`
     } else {
-      editPrompt = `Create a professionally retouched portrait photo with these enhancements:
-      - Perfect the skin with smooth, clear, radiant complexion
-      - Enhance facial features naturally
-      - Improve overall photo quality
-      - Maintain natural appearance
-      - Keep the same pose, background, and lighting
-      - Professional photo quality`
+      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
+
+Requirements:
+- Flawless skin with perfect complexion
+- Natural enhancement of facial features
+- Professional lighting and composition
+- High-resolution quality
+- Keep the same pose and similar background
+- Natural, professional appearance
+
+Create a beautiful, professionally retouched portrait.`
     }
 
-    // Gemini로 이미지 편집 (현재 Gemini는 이미지 생성을 직접 지원하지 않을 수 있음)
-    // 이 경우 분석 결과를 기반으로 Sharp로 처리
-    console.log('Image editing with Gemini requested, falling back to Sharp enhancement')
+    // Gemini로 이미지 생성 시도
+    const imageResult = await imageModel.generateContent([
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: base64Image
+        }
+      },
+      imagePrompt
+    ])
 
-    return null // Gemini 이미지 편집이 준비되면 여기서 반환
+    // 생성된 이미지가 있는지 확인
+    if (imageResult.response.candidates && imageResult.response.candidates[0].content.parts) {
+      for (const part of imageResult.response.candidates[0].content.parts) {
+        if (part.inlineData && part.inlineData.data) {
+          console.log('Successfully generated image with Gemini')
+          // base64 데이터를 Buffer로 변환
+          const generatedBuffer = Buffer.from(part.inlineData.data, 'base64')
+          return generatedBuffer
+        }
+      }
+    }
+
+    console.log('No image generated, falling back to Sharp')
+    return null
   } catch (error) {
     console.error('Gemini enhancement failed:', error)
     return null
@@ -150,19 +192,17 @@ export async function POST(request: NextRequest) {
 
     console.log('Enhanced image size:', (enhancedBuffer.length / 1024).toFixed(2), 'KB')
 
-    // 고유 ID 생성
-    const imageId = Date.now().toString(36) + Math.random().toString(36).substr(2)
+    // Vercel Blob에 이미지 업로드
+    const filename = `proof-of-absence-${Date.now()}.jpg`
+    const blob = await put(filename, enhancedBuffer, {
+      access: 'public',
+      contentType: 'image/jpeg',
+    })
 
-    // 메모리에 보정된 이미지 저장 (원본은 즉시 버림)
-    imageStore.set(imageId, enhancedBuffer)
-
-    // 자동 정리 스케줄
-    scheduleImageCleanup(imageId)
-
-    console.log(`Image ${imageId} enhanced and stored in memory`)
+    console.log(`Image uploaded to Vercel Blob: ${blob.url}`)
 
     return NextResponse.json({
-      imageId,
+      downloadUrl: blob.url,
       success: true
     })
   } catch (error) {

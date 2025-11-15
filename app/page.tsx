@@ -96,13 +96,9 @@ export default function Photobooth() {
 
       const data = await response.json()
 
-      if (data.imageId) {
-        // 현재 도메인 기반으로 다운로드 URL 생성
-        const baseUrl = window.location.origin
-        const downloadLink = `${baseUrl}/api/download/${data.imageId}`
-
-        // QR 코드 생성
-        const qr = await QRCode.toDataURL(downloadLink, {
+      if (data.downloadUrl) {
+        // QR 코드 생성 (다운로드 URL로)
+        const qr = await QRCode.toDataURL(data.downloadUrl, {
           width: 400,
           margin: 2,
           color: {
@@ -112,7 +108,7 @@ export default function Photobooth() {
         })
 
         setQrCodeUrl(qr)
-        setDownloadUrl(downloadLink)
+        setDownloadUrl(data.downloadUrl)
         setStage('result')
       }
     } catch (error) {
