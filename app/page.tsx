@@ -1,0 +1,228 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+import QRCode from 'qrcode'
+
+type Stage = 'idle' | 'countdown' | 'processing' | 'result'
+
+export default function Photobooth() {
+  const [stage, setStage] = useState<Stage>('idle')
+  const [countdown, setCountdown] = useState(3)
+  const [qrCodeUrl, setQrCodeUrl] = useState('')
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  useEffect(() => {
+    // 컴포넌트 마운트 시 카메라 시작
+    startCamera()
+    return () => {
+      // 클린업: 카메라 정지
+      stopCamera()
+    }
+  }, [])
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: 1280, height: 720 },
+        audio: false
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+    } catch (err) {
+      console.error('카메라 접근 실패:', err)
+      alert('카메라에 접근할 수 없습니다. 권한을 확인해주세요.')
+    }
+  }
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+      streamRef.current = null
+    }
+  }
+
+  const handleCapture = () => {
+    setStage('countdown')
+    setCountdown(3)
+
+    const countdownInterval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(countdownInterval)
+          captureAndProcess()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }
+
+  const captureAndProcess = async () => {
+    setStage('processing')
+
+    // 캔버스에 비디오 프레임 캡처
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    ctx.drawImage(video, 0, 0)
+
+    try {
+      // Canvas를 Blob으로 변환
+      const blob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob)
+        }, 'image/jpeg', 0.9)
+      })
+
+      // FormData로 서버에 전송
+      const formData = new FormData()
+      formData.append('image', blob, 'photo.jpg')
+
+      const response = await fetch('/api/enhance', {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (data.imageId) {
+        // 현재 도메인 기반으로 다운로드 URL 생성
+        const baseUrl = window.location.origin
+        const downloadLink = `${baseUrl}/api/download/${data.imageId}`
+
+        // QR 코드 생성
+        const qr = await QRCode.toDataURL(downloadLink, {
+          width: 400,
+          margin: 2,
+          color: {
+            dark: '#000000',
+            light: '#ffffff'
+          }
+        })
+
+        setQrCodeUrl(qr)
+        setDownloadUrl(downloadLink)
+        setStage('result')
+      }
+    } catch (error) {
+      console.error('처리 실패:', error)
+      alert('이미지 처리 중 오류가 발생했습니다.')
+      setStage('idle')
+    }
+  }
+
+  const reset = () => {
+    setStage('idle')
+    setQrCodeUrl('')
+    setDownloadUrl('')
+    startCamera()
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
+      {/* Hidden video and canvas */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden"
+      />
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* Main UI */}
+      <div className="w-full max-w-2xl">
+        {/* Title */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl md:text-6xl font-bold text-gray-300 mb-2">
+            부재의 증명사진
+          </h1>
+          <p className="text-xl md:text-2xl text-gray-500 italic">
+            Proof of Absence
+          </p>
+        </div>
+
+        {/* Content Area */}
+        <div className="bg-gradient-to-br from-gray-900/60 to-gray-800/60 backdrop-blur-sm border border-gray-700/50 rounded-3xl p-8 md:p-12 min-h-[500px] flex flex-col items-center justify-center">
+
+          {stage === 'idle' && (
+            <div className="text-center space-y-8">
+              <p className="text-2xl md:text-3xl text-gray-300">
+                준비되셨습니까?
+              </p>
+              <button
+                onClick={handleCapture}
+                className="bg-gray-700 hover:bg-gray-600 text-white text-xl md:text-2xl px-12 py-6 rounded-2xl transition-colors font-semibold"
+              >
+                촬영 시작
+              </button>
+              <p className="text-sm md:text-base text-gray-500 italic">
+                원본은 저장되지 않습니다
+              </p>
+            </div>
+          )}
+
+          {stage === 'countdown' && (
+            <div className="text-center">
+              <p className="text-9xl md:text-[200px] font-bold text-white">
+                {countdown}
+              </p>
+            </div>
+          )}
+
+          {stage === 'processing' && (
+            <div className="text-center space-y-6">
+              <div className="animate-spin rounded-full h-24 w-24 border-b-4 border-gray-400 mx-auto"></div>
+              <p className="text-2xl md:text-3xl text-gray-300">
+                처리 중...
+              </p>
+              <p className="text-base md:text-lg text-gray-500">
+                원본은 삭제되었습니다
+              </p>
+            </div>
+          )}
+
+          {stage === 'result' && (
+            <div className="text-center space-y-8">
+              <p className="text-2xl md:text-3xl text-gray-300 mb-6">
+                이미지가 준비되었습니다
+              </p>
+              {qrCodeUrl && (
+                <div className="bg-white p-6 rounded-2xl inline-block">
+                  <img src={qrCodeUrl} alt="QR Code" className="w-64 h-64 md:w-80 md:h-80" />
+                </div>
+              )}
+              <p className="text-base md:text-lg text-gray-400">
+                QR 코드를 스캔하여 다운로드하세요
+              </p>
+              <button
+                onClick={reset}
+                className="bg-gray-700 hover:bg-gray-600 text-white text-lg md:text-xl px-8 py-4 rounded-2xl transition-colors mt-6"
+              >
+                다시 촬영
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="text-center mt-8 text-gray-600 text-sm md:text-base">
+          <p className="italic">
+            "원본은 이미 죽었다. 당신이 죽였고, 우리 모두가 공범이다."
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
