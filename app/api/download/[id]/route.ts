@@ -25,8 +25,8 @@ export async function GET(
       )
     }
 
-    // 이미지 반환
-    return new NextResponse(imageBuffer, {
+    // 이미지 반환 (Buffer를 Uint8Array로 변환)
+    return new NextResponse(new Uint8Array(imageBuffer), {
       headers: {
         'Content-Type': 'image/jpeg',
         'Content-Disposition': `attachment; filename="proof-of-absence-${id}.jpg"`,
