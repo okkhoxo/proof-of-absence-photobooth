@@ -14,11 +14,7 @@ async function enhanceImage(buffer: Buffer): Promise<Buffer> {
       // 대비 증가
       .linear(1.1, -(128 * 0.1))
       // 선명도 증가
-      .sharpen({
-        sigma: 1,
-        flat: 1,
-        jagged: 2
-      })
+      .sharpen(1, 1, 2)
       // 노이즈 제거
       .median(3)
       // JPEG으로 변환 (고품질)
