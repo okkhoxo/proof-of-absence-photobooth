@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { imageStore } from '../../enhance/route'
+import { imageStore } from '@/lib/imageStore'
 
 export async function GET(
   request: NextRequest,

@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import sharp from 'sharp'
-
-// 메모리에 이미지 임시 저장 (실제 배포 시에는 DB나 스토리지 사용)
-const imageStore = new Map<string, Buffer>()
-
-// 이미지 자동 정리 (10분 후 삭제)
-function scheduleImageCleanup(id: string) {
-  setTimeout(() => {
-    imageStore.delete(id)
-    console.log(`Image ${id} deleted from memory`)
-  }, 10 * 60 * 1000) // 10분
-}
+import { imageStore, scheduleImageCleanup } from '@/lib/imageStore'
 
 // AI 스타일 이미지 보정
 async function enhanceImage(buffer: Buffer): Promise<Buffer> {
@@ -89,6 +79,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
-// 저장된 이미지를 가져오는 함수 (다운로드 API에서 사용)
-export { imageStore }
