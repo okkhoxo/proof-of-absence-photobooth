@@ -66,12 +66,13 @@ export default function Photobooth() {
 
     const countdownInterval = setInterval(() => {
       setCountdown(prev => {
-        if (prev <= 1) {
+        const next = prev - 1
+        if (next === 0) {
           clearInterval(countdownInterval)
-          capturePhoto()
-          return 0
+          // 0으로 바뀐 직후 약간의 지연을 두고 촬영
+          setTimeout(() => capturePhoto(), 100)
         }
-        return prev - 1
+        return next
       })
     }, 1000)
   }
