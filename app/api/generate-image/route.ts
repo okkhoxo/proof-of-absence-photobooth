@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
         console.log('  ✏️  텍스트 응답:', part.text.substring(0, 100) + (part.text.length > 100 ? '...' : ''));
       }
 
-      if (part.inlineData) {
+      if (part.inlineData && part.inlineData.data) {
         imageBase64 = part.inlineData.data;
         const sizeKB = (imageBase64.length * 0.75 / 1024).toFixed(2);
         console.log('  🖼️  이미지 데이터 발견');
