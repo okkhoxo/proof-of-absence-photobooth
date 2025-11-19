@@ -3,13 +3,11 @@
 import { useState, useRef, useEffect } from 'react'
 import QRCode from 'qrcode'
 
-type Stage = 'idle' | 'countdown' | 'preview' | 'processing' | 'result'
+type Stage = 'idle' | 'countdown' | 'processing' | 'result'
 
 export default function Photobooth() {
   const [stage, setStage] = useState<Stage>('idle')
   const [countdown, setCountdown] = useState(3)
-  const [capturedImage, setCapturedImage] = useState('')
-  const [aiImage, setAiImage] = useState('')
   const [qrCodeUrl, setQrCodeUrl] = useState('')
   const [downloadUrl, setDownloadUrl] = useState('')
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -70,14 +68,16 @@ export default function Photobooth() {
         if (next === 0) {
           clearInterval(countdownInterval)
           // 0으로 바뀐 직후 약간의 지연을 두고 촬영
-          setTimeout(() => capturePhoto(), 100)
+          setTimeout(() => captureAndProcess(), 100)
         }
         return next
       })
     }, 1000)
   }
 
-  const capturePhoto = () => {
+  const captureAndProcess = async () => {
+    setStage('processing')
+
     // 캔버스에 비디오 프레임 캡처
     const video = videoRef.current
     const canvas = canvasRef.current
@@ -101,24 +101,9 @@ export default function Photobooth() {
     canvas.height = video.videoHeight
     ctx.drawImage(video, 0, 0)
 
-    // Canvas를 Data URL로 변환하여 저장
-    const imageUrl = canvas.toDataURL('image/jpeg', 0.9)
-    setCapturedImage(imageUrl)
-
     console.log('📸 Frontend: Photo captured')
     console.log('  Video 크기:', video.videoWidth, 'x', video.videoHeight)
     console.log('  Canvas 크기:', canvas.width, 'x', canvas.height)
-    console.log('  Image URL 길이:', imageUrl.length)
-
-    // preview 단계로 전환
-    setStage('preview')
-  }
-
-  const applyAiFilter = async () => {
-    setStage('processing')
-
-    const canvas = canvasRef.current
-    if (!canvas) return
 
     try {
       // Canvas를 Blob으로 변환
@@ -144,9 +129,6 @@ export default function Photobooth() {
       const data = await response.json()
 
       if (data.downloadUrl) {
-        // AI 변형된 이미지 저장
-        setAiImage(data.downloadUrl)
-
         // QR 코드 생성 (다운로드 URL로)
         const qr = await QRCode.toDataURL(data.downloadUrl, {
           width: 400,
@@ -164,14 +146,12 @@ export default function Photobooth() {
     } catch (error) {
       console.error('처리 실패:', error)
       alert('이미지 처리 중 오류가 발생했습니다.')
-      setStage('preview')
+      setStage('idle')
     }
   }
 
   const reset = () => {
     setStage('idle')
-    setCapturedImage('')
-    setAiImage('')
     setQrCodeUrl('')
     setDownloadUrl('')
     startCamera()
@@ -229,37 +209,6 @@ export default function Photobooth() {
             </div>
           )}
 
-          {stage === 'preview' && (
-            <div className="text-center space-y-6">
-              <p className="text-2xl md:text-3xl text-gray-300 mb-4">
-                촬영된 사진
-              </p>
-              {capturedImage && (
-                <div className="bg-gray-800 p-4 rounded-2xl inline-block">
-                  <img
-                    src={capturedImage}
-                    alt="Captured"
-                    className="max-w-full max-h-96 rounded-lg"
-                  />
-                </div>
-              )}
-              <div className="flex gap-4 justify-center mt-6">
-                <button
-                  onClick={reset}
-                  className="bg-gray-600 hover:bg-gray-500 text-white text-lg md:text-xl px-8 py-4 rounded-2xl transition-colors"
-                >
-                  다시 찍기
-                </button>
-                <button
-                  onClick={applyAiFilter}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-lg md:text-xl px-8 py-4 rounded-2xl transition-colors"
-                >
-                  AI 필터 적용하기
-                </button>
-              </div>
-            </div>
-          )}
-
           {stage === 'processing' && (
             <div className="text-center space-y-6">
               <div className="animate-spin rounded-full h-24 w-24 border-b-4 border-gray-400 mx-auto"></div>
@@ -275,19 +224,8 @@ export default function Photobooth() {
           {stage === 'result' && (
             <div className="text-center space-y-8">
               <p className="text-2xl md:text-3xl text-gray-300 mb-6">
-                AI 필터가 적용된 이미지
+                이미지가 생성되었습니다
               </p>
-
-              {/* AI 변형 이미지 */}
-              {aiImage && (
-                <div className="bg-gray-800 p-4 rounded-2xl inline-block mb-6">
-                  <img
-                    src={aiImage}
-                    alt="AI Enhanced"
-                    className="max-w-full max-h-96 rounded-lg"
-                  />
-                </div>
-              )}
 
               {/* QR 코드 */}
               {qrCodeUrl && (

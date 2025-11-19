@@ -38,19 +38,20 @@ async function enhanceWithGemini(buffer: Buffer): Promise<Buffer | null> {
     const ai = new GoogleGenAI({ apiKey })
     console.log('✅ GoogleGenAI 인스턴스 생성 완료')
 
-    // 이미지 편집 프롬프트 (강력한 보정)
-    const imagePrompt = `Transform this photo into a dramatically enhanced professional studio portrait.
+    // 이미지 편집 프롬프트 (지브리 스타일)
+    const imagePrompt = `Transform this photo into a beautiful Studio Ghibli animation style portrait.
 
-Apply significant improvements:
-- Perfect flawless skin with professional retouching
-- Dramatically improved lighting with professional studio setup
-- Significantly enhanced facial features and proportions
-- Professional color grading and tones
-- High-end magazine quality finish
-- Cinematic depth and clarity
+Apply Studio Ghibli aesthetic:
+- Hand-drawn anime art style like Hayao Miyazaki films
+- Soft, dreamy watercolor-like colors and lighting
+- Characteristic Ghibli facial features (large expressive eyes, gentle expressions)
+- Warm, nostalgic atmosphere with painterly quality
+- Detailed hair with natural flow and movement
+- Soft shading and highlights typical of Ghibli characters
+- Magical, whimsical feeling
 
-Make the person look significantly more attractive and polished while keeping their identity recognizable.
-Create a stunning, dramatically improved version.`
+Keep the person's identity and features recognizable but transformed into enchanting Ghibli anime character.
+Create a stunning, high-quality Studio Ghibli style illustration.`
 
     console.log('🎨 Gemini 2.5 Flash Image 모델로 이미지 생성 중...')
     console.log('📝 프롬프트:', imagePrompt)
