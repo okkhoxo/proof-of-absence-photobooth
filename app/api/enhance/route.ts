@@ -1,208 +1,214 @@
 import { NextRequest, NextResponse } from 'next/server'
-import sharp from 'sharp'
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import { put } from '@vercel/blob'
+import { GoogleGenAI } from '@google/genai'
+import * as admin from 'firebase-admin'
 
-const genAI = process.env.GEMINI_API_KEY
-  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-  : null
+// Firebase Admin 초기화
+if (!admin.apps.length && process.env.FIREBASE_SERVICE_ACCOUNT) {
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+  })
+}
 
-// Gemini를 사용한 고급 AI 보정
+// Gemini를 사용한 고급 AI 보정 및 이미지 생성
 async function enhanceWithGemini(buffer: Buffer): Promise<Buffer | null> {
-  if (!genAI) {
-    console.log('Gemini API key not found, skipping AI enhancement')
-    return null
-  }
+  console.log('=== Gemini 이미지 보정 시작 ===')
 
   try {
-    const analyzeModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+    // API 키 확인
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      console.error('❌ GEMINI_API_KEY가 설정되지 않음')
+      return null
+    }
+    console.log('✅ API 키 확인 완료')
 
     // 이미지를 base64로 변환
     const base64Image = buffer.toString('base64')
+    console.log('📦 Base64 변환 완료:')
+    console.log('  원본 Buffer 크기:', (buffer.length / 1024).toFixed(2), 'KB')
+    console.log('  Base64 문자열 길이:', base64Image.length)
+    console.log('  예상 원본 크기:', (base64Image.length * 0.75 / 1024).toFixed(2), 'KB')
+    console.log('  Base64 첫 50자:', base64Image.substring(0, 50))
+    console.log('  Base64 끝 50자:', base64Image.substring(base64Image.length - 50))
 
-    // 1단계: 성별 분석
-    const analyzePrompt = `Analyze this portrait photo and determine the gender of the person.
-    Respond with only one word: "female", "male", or "unknown".`
+    // GoogleGenAI 인스턴스 생성
+    console.log('🔧 GoogleGenAI 인스턴스 생성 중...')
+    const ai = new GoogleGenAI({ apiKey })
+    console.log('✅ GoogleGenAI 인스턴스 생성 완료')
 
-    const analyzeResult = await analyzeModel.generateContent([
-      {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: base64Image
-        }
-      },
-      analyzePrompt
-    ])
+    // 이미지 편집 프롬프트 (강력한 보정)
+    const imagePrompt = `Transform this photo into a dramatically enhanced professional studio portrait.
 
-    const gender = analyzeResult.response.text().trim().toLowerCase()
-    console.log('Detected gender:', gender)
+Apply significant improvements:
+- Perfect flawless skin with professional retouching
+- Dramatically improved lighting with professional studio setup
+- Significantly enhanced facial features and proportions
+- Professional color grading and tones
+- High-end magazine quality finish
+- Cinematic depth and clarity
 
-    // 2단계: 이미지 생성 모델로 전환
-    const imageModel = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-latest',
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.8,
-      }
+Make the person look significantly more attractive and polished while keeping their identity recognizable.
+Create a stunning, dramatically improved version.`
+
+    console.log('🎨 Gemini 2.5 Flash Image 모델로 이미지 생성 중...')
+    console.log('📝 프롬프트:', imagePrompt)
+
+    console.log('\n📤 Gemini API 요청 (이미지 생성):')
+    console.log('  모델: gemini-2.5-flash-image')
+    console.log('  입력 이미지: ✅ 포함됨 (같은 base64 이미지)')
+    console.log('  contents 배열:')
+    console.log('    [0]: text (프롬프트) ← TEXT FIRST')
+    console.log('    [1]: inlineData (이미지) ← IMAGE SECOND')
+    console.log('  ⚠️  중요: 공식 문서에 따라 TEXT를 IMAGE보다 먼저 배치!')
+
+    const startTime = Date.now()
+
+    const imageResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: [
+        { text: imagePrompt },  // TEXT FIRST - 이미지 편집 지시사항
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: base64Image
+          }
+        }  // IMAGE SECOND - 편집할 원본 이미지
+      ]
     })
 
-    // 성별에 따른 이미지 생성 프롬프트
-    let imagePrompt = ''
-    if (gender.includes('female')) {
-      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2)
+    console.log(`⏱️  이미지 생성 완료 (소요 시간: ${duration}초)`)
 
-Requirements for the enhanced portrait:
-- Face contour: Slim, refined V-shaped face with elegant jawline
-- Skin: Flawless, radiant complexion with perfect even tone, smooth texture, natural glow
-- Eyes: Beautifully enlarged by 10-15%, bright and expressive with natural sparkle
-- Nose: Refined, slightly elevated bridge with elegant shape
-- Overall: Enhanced feminine beauty with graceful features
-- Lighting: Professional studio lighting, soft and flattering
-- Makeup: Natural but polished - subtle enhancement
-- Quality: High-resolution professional photo quality
-- Style: Keep the same pose, similar background, natural and elegant
+    // 응답 파싱 (SDK 형식, camelCase 사용)
+    console.log('\n📦 응답 파싱 중...')
 
-Create a beautiful, professionally retouched portrait that looks natural and stunning.`
-    } else if (gender.includes('male')) {
-      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
-
-Requirements for the enhanced portrait:
-- Shoulders: Broader by 10-15%, athletic and strong appearance
-- Skin: Clear, healthy masculine complexion with even tone
-- Face: Strong jawline, defined facial features, masculine charm
-- Body: Athletic build with natural muscle definition
-- Overall: Enhanced masculine features with confidence
-- Lighting: Professional studio lighting with dramatic shadows
-- Quality: High-resolution professional photo quality
-- Style: Keep the same pose, similar background, natural and powerful
-
-Create a handsome, professionally retouched portrait that looks natural and confident.`
-    } else {
-      imagePrompt = `Generate a professionally retouched portrait photograph based on this reference image.
-
-Requirements:
-- Flawless skin with perfect complexion
-- Natural enhancement of facial features
-- Professional lighting and composition
-- High-resolution quality
-- Keep the same pose and similar background
-- Natural, professional appearance
-
-Create a beautiful, professionally retouched portrait.`
+    if (!imageResponse.candidates || imageResponse.candidates.length === 0) {
+      console.error('❌ 응답에 candidates가 없음')
+      console.error('응답 객체:', JSON.stringify(imageResponse, null, 2))
+      return null
     }
 
-    // Gemini로 이미지 생성 시도
-    const imageResult = await imageModel.generateContent([
-      {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: base64Image
-        }
-      },
-      imagePrompt
-    ])
+    console.log('✅ candidates 개수:', imageResponse.candidates.length)
 
-    // 생성된 이미지가 있는지 확인
-    if (imageResult.response.candidates && imageResult.response.candidates[0].content.parts) {
-      for (const part of imageResult.response.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.data) {
-          console.log('Successfully generated image with Gemini')
-          // base64 데이터를 Buffer로 변환
-          const generatedBuffer = Buffer.from(part.inlineData.data, 'base64')
-          return generatedBuffer
-        }
+    const content = imageResponse.candidates[0]?.content
+    if (!content || !content.parts || content.parts.length === 0) {
+      console.error('❌ 응답에 parts가 없음')
+      console.error('content:', JSON.stringify(content, null, 2))
+      return null
+    }
+
+    console.log(`📊 응답 parts 개수: ${content.parts.length}`)
+    console.log('각 part 타입:')
+    content.parts.forEach((part: any, idx: number) => {
+      console.log(`  Part ${idx}: text=${!!part.text}, inlineData=${!!part.inlineData}`)
+    })
+
+    for (let i = 0; i < content.parts.length; i++) {
+      const part = content.parts[i]
+      console.log(`📌 Part ${i + 1}:`, {
+        hasText: !!part.text,
+        hasInlineData: !!part.inlineData
+      })
+
+      // SDK 응답은 camelCase (inlineData)
+      if (part.inlineData && part.inlineData.data) {
+        console.log('✅ 이미지 데이터 발견')
+        const sizeKB = (part.inlineData.data.length * 0.75 / 1024).toFixed(2)
+        console.log(`📦 이미지 크기: 약 ${sizeKB} KB`)
+
+        const generatedBuffer = Buffer.from(part.inlineData.data, 'base64')
+        console.log('✅ Successfully enhanced with Gemini 2.5 Flash Image (SDK)')
+        return generatedBuffer
       }
     }
 
-    console.log('No image generated, falling back to Sharp')
+    console.log('❌ 응답에 이미지가 없음')
     return null
-  } catch (error) {
-    console.error('Gemini enhancement failed:', error)
+  } catch (error: any) {
+    console.error('=== Gemini Enhancement Error ===')
+    console.error('에러 메시지:', error.message)
+    console.error('에러 스택:', error.stack)
+
     return null
   }
 }
 
-// Sharp를 사용한 기본 보정
-async function enhanceWithSharp(buffer: Buffer, enhancementLevel: 'light' | 'medium' | 'strong' = 'medium'): Promise<Buffer> {
-  try {
-    let pipeline = sharp(buffer)
-      .modulate({
-        brightness: 1.05,
-        saturation: 1.1,
-      })
-      .linear(1.1, -(128 * 0.1))
-      .sharpen(1, 1, 2)
-      .median(3)
-
-    // 추가 처리 레벨에 따라
-    if (enhancementLevel === 'strong') {
-      pipeline = pipeline
-        .modulate({
-          brightness: 1.08,
-          saturation: 1.15,
-        })
-        .sharpen(1.5, 1, 2.5)
-    }
-
-    const enhancedBuffer = await pipeline
-      .jpeg({ quality: 95 })
-      .toBuffer()
-
-    return enhancedBuffer
-  } catch (error) {
-    console.error('Sharp enhancement failed:', error)
-    return buffer
-  }
-}
-
-// 통합 이미지 보정 함수
+// 통합 이미지 보정 함수 - Gemini만 사용
 async function enhanceImage(buffer: Buffer): Promise<Buffer> {
-  // Gemini 시도
   const geminiResult = await enhanceWithGemini(buffer)
   if (geminiResult) {
-    console.log('Enhanced with Gemini')
+    console.log('Successfully enhanced with Gemini')
     return geminiResult
   }
 
-  // Gemini 실패 시 Sharp 사용
-  console.log('Enhanced with Sharp')
-  return await enhanceWithSharp(buffer, 'medium')
+  // Gemini 실패 시 에러 발생
+  throw new Error('Image enhancement failed: Gemini API is unavailable')
 }
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('\n🔵 === POST /api/enhance 요청 수신 ===')
+
     const formData = await request.formData()
     const imageFile = formData.get('image') as File
 
     if (!imageFile) {
+      console.error('❌ 이미지 파일이 없음')
       return NextResponse.json(
         { error: 'No image provided' },
         { status: 400 }
       )
     }
 
+    console.log('📥 받은 이미지 파일:')
+    console.log('  이름:', imageFile.name)
+    console.log('  타입:', imageFile.type)
+    console.log('  크기:', (imageFile.size / 1024).toFixed(2), 'KB')
+
     // 이미지를 Buffer로 변환
     const arrayBuffer = await imageFile.arrayBuffer()
     const originalBuffer = Buffer.from(arrayBuffer)
 
-    console.log('Original image size:', (originalBuffer.length / 1024).toFixed(2), 'KB')
+    console.log('📦 Buffer 변환 완료:', (originalBuffer.length / 1024).toFixed(2), 'KB')
+    console.log('  Buffer 첫 10 바이트:', originalBuffer.slice(0, 10).toString('hex'))
+
+    // JPEG 파일 시그니처 확인 (FFD8FF로 시작해야 함)
+    const isValidJPEG = originalBuffer[0] === 0xFF && originalBuffer[1] === 0xD8 && originalBuffer[2] === 0xFF
+    console.log('  JPEG 시그니처 유효:', isValidJPEG ? '✅' : '❌')
 
     // AI 보정 적용
     const enhancedBuffer = await enhanceImage(originalBuffer)
 
     console.log('Enhanced image size:', (enhancedBuffer.length / 1024).toFixed(2), 'KB')
 
-    // Vercel Blob에 이미지 업로드
-    const filename = `proof-of-absence-${Date.now()}.jpg`
-    const blob = await put(filename, enhancedBuffer, {
-      access: 'public',
-      contentType: 'image/jpeg',
+    // Firebase Storage에 이미지 업로드
+    if (!admin.apps.length) {
+      return NextResponse.json(
+        { error: 'Firebase not configured' },
+        { status: 500 }
+      )
+    }
+
+    const bucket = admin.storage().bucket()
+    const filename = `proof-of-absence/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`
+    const file = bucket.file(filename)
+
+    await file.save(enhancedBuffer, {
+      metadata: {
+        contentType: 'image/jpeg',
+      },
+      public: true,
     })
 
-    console.log(`Image uploaded to Vercel Blob: ${blob.url}`)
+    // 공개 URL 생성
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filename}`
+
+    console.log(`Image uploaded to Firebase: ${publicUrl}`)
 
     return NextResponse.json({
-      downloadUrl: blob.url,
+      downloadUrl: publicUrl,
       success: true
     })
   } catch (error) {
